@@ -1,38 +1,39 @@
-import fs from "fs";
-import path from "path";
-import matter from "gray-matter";
+const GITHUB_OWNER = "zent-Studio-net";
+const GITHUB_REPO = "legal_docs";
+const GITHUB_BRANCH = "main";
 
-const DOCS_ROOT = path.join(process.cwd(), "docs");
+const RAW_BASE = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}`;
+const API_BASE = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents`;
 
-export type DocParams = { app: string; doc: string };
+// Revalidate frequently so new docs show up fast without a redeploy.
+const REVALIDATE_SECONDS = 30;
 
-export function getAllDocParams(): DocParams[] {
-  if (!fs.existsSync(DOCS_ROOT)) return [];
-  const apps = fs.readdirSync(DOCS_ROOT, { withFileTypes: true }).filter((d) => d.isDirectory());
+type GithubContentEntry = { name: string; type: "file" | "dir" };
 
-  return apps.flatMap((appDir) => {
-    const appPath = path.join(DOCS_ROOT, appDir.name);
-    return fs
-      .readdirSync(appPath)
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => ({ app: appDir.name, doc: f.replace(/\.md$/, "") }));
+export async function listApps(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/docs?ref=${GITHUB_BRANCH}`, {
+    next: { revalidate: REVALIDATE_SECONDS },
   });
+  if (!res.ok) return [];
+  const entries: GithubContentEntry[] = await res.json();
+  return entries.filter((e) => e.type === "dir").map((e) => e.name);
 }
 
-export function getDoc(app: string, doc: string) {
-  const filePath = path.join(DOCS_ROOT, app, `${doc}.md`);
-  if (!fs.existsSync(filePath)) return null;
-
-  const raw = fs.readFileSync(filePath, "utf-8");
-  const { content, data } = matter(raw);
-  return { content, frontmatter: data };
+export async function listDocs(app: string): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/docs/${app}?ref=${GITHUB_BRANCH}`, {
+    next: { revalidate: REVALIDATE_SECONDS },
+  });
+  if (!res.ok) return [];
+  const entries: GithubContentEntry[] = await res.json();
+  return entries
+    .filter((e) => e.type === "file" && e.name.endsWith(".md"))
+    .map((e) => e.name.replace(/\.md$/, ""));
 }
 
-export function getAppDocs(app: string) {
-  const appPath = path.join(DOCS_ROOT, app);
-  if (!fs.existsSync(appPath)) return [];
-  return fs
-    .readdirSync(appPath)
-    .filter((f) => f.endsWith(".md"))
-    .map((f) => f.replace(/\.md$/, ""));
+export async function getDoc(app: string, doc: string): Promise<string | null> {
+  const res = await fetch(`${RAW_BASE}/docs/${app}/${doc}.md`, {
+    next: { revalidate: REVALIDATE_SECONDS },
+  });
+  if (!res.ok) return null;
+  return res.text();
 }
